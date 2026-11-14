@@ -472,145 +472,138 @@ dialog.au.wide{width:min(820px,100% - 24px)}
   <p class="msg" id="adm-msg" role="alert"></p>
 </div></dialog>
 
-<script>
-(function(){
-"use strict";
-/* ===== إعدادات ===== */
-var ADMIN_PHONE="01024154822", SALT="mrgn-office-v1", ADMIN_HASH="089da01324b940c25ca5fb4620b9867275da379ef804af3058009cb30be623a4";
-var OTP_DEMO=true; /* true = الكود بيظهر على الشاشة (تجريبي). للإرسال الحقيقي لازم مزوّد SMS/جوجل على سيرفر. */
-var $=function(s){return document.querySelector(s)};
-var mem={};
-function ls(k,v){try{if(v===undefined){var r=localStorage.getItem(k);return r==null?mem[k]:r}localStorage.setItem(k,v)}catch(e){if(v===undefined)return mem[k];mem[k]=v}}
-function users(){try{return JSON.parse(ls("morgan_users")||"[]")}catch(e){return[]}}
-function saveUsers(u){ls("morgan_users",JSON.stringify(u))}
-function hash(p){var d=new TextEncoder().encode(SALT+String(p).replace(/\s+/g,"").toUpperCase());return crypto.subtle.digest("SHA-256",d).then(function(b){return Array.prototype.map.call(new Uint8Array(b),function(x){return("0"+x.toString(16)).slice(-2)}).join("")})}
-function normId(m,v){v=String(v||"").trim().toLowerCase().replace(/[\u0660-\u0669]/g,function(c){return c.charCodeAt(0)-1632});return m==="phone"?v.replace(/[\s-]/g,""):v}
-function okId(m,v){return m==="phone"?/^01[0125]\d{8}$/.test(v):/^[a-z0-9._%+-]+@gmail\.com$/.test(v)}
-function mk(tag,txt,cls,attrs){var e=document.createElement(tag);if(txt)e.textContent=txt;if(cls)e.className=cls;for(var k in(attrs||{}))e.setAttribute(k,attrs[k]);return e}
-function field(id,label,type,dir,ph){var w=document.createElement("div");w.appendChild(mk("label",label,"",{for:id}));w.appendChild(mk("input","","",{id:id,type:type||"text",dir:dir||"ltr",placeholder:ph||"",autocomplete:"off"}));return w}
-function fmt(t){return t?new Date(t).toLocaleDateString("ar-EG"):"—"}
-
-var dlg=$("#auth"),body=$("#au-body"),msg=$("#au-msg"),adm=$("#adm");
-var st={m:"phone",id:"",code:"",tries:0};
-function say(t){msg.textContent=t||""}
+<script type="module">
+import {initializeApp,deleteApp} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+import {getAuth,createUserWithEmailAndPassword,signInWithEmailAndPassword,signOut,onAuthStateChanged} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+import {getFirestore,doc,setDoc,getDoc,updateDoc,deleteDoc,collection,onSnapshot} from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+const cfg={apiKey:"AIzaSyDYKVxzOxLS1TXuE93_HHI5oG66o_iE_wA",authDomain:"morgan-office.firebaseapp.com",projectId:"morgan-office",storageBucket:"morgan-office.firebasestorage.app",messagingSenderId:"125320320523",appId:"1:125320320523:web:509c9f6fb80f97cb65990e"};
+const app=initializeApp(cfg),auth=getAuth(app),db=getFirestore(app);
+const ADMIN="01024154822",DOM="@phone.morgan-office.app";
+const $=s=>document.querySelector(s);
+const mk=(t,x,c,a)=>{const e=document.createElement(t);if(x)e.textContent=x;if(c)e.className=c;for(const k in(a||{}))e.setAttribute(k,a[k]);return e};
+const norm=(m,v)=>{v=String(v||"").trim().toLowerCase().replace(/[\u0660-\u0669]/g,c=>c.charCodeAt(0)-1632);return m==="phone"?v.replace(/[\s-]/g,""):v};
+const okId=(m,v)=>m==="phone"?/^01[0125]\d{8}$/.test(v):/^[a-z0-9._%+-]+@gmail\.com$/.test(v);
+const mail=(m,v)=>m==="phone"?v+DOM:v;
+const isAdmin=u=>!!u&&u.email===ADMIN+DOM;
+const fmt=t=>t?new Date(t).toLocaleDateString("ar-EG"):"—";
+const ERR={"auth/email-already-in-use":"الحساب ده متسجل قبل كده.","auth/invalid-credential":"الحساب أو كلمة السر غلط.","auth/wrong-password":"الحساب أو كلمة السر غلط.","auth/user-not-found":"الحساب أو كلمة السر غلط.","auth/weak-password":"كلمة السر ضعيفة (6 على الأقل).","auth/network-request-failed":"مشكلة في النت، جرّب تاني.","auth/too-many-requests":"محاولات كتير، استنى شوية.","auth/operation-not-allowed":"تسجيل الدخول بالإيميل/باسورد مش مفعّل في Firebase.","permission-denied":"مفيش صلاحية (راجع قواعد Firestore)."};
+const em=e=>ERR[e&&e.code]||("حصل خطأ: "+(e&&e.code||e));
+const dlg=$("#auth"),body=$("#au-body"),msg=$("#au-msg"),adm=$("#adm"),hb=$("#auth-open");
+const st={m:"phone",id:""};
+const say=t=>{msg.textContent=t||""};
 function head(t,s){$("#au-title").textContent=t;$("#au-sub").textContent=s||"";body.textContent="";say("")}
-function btn(t,cls,fn){var b=mk("button",t,"btn "+cls,{type:"button"});b.addEventListener("click",fn);return b}
-function lnk(t,fn){var b=mk("button",t,"link",{type:"button"});b.addEventListener("click",fn);return b}
+function btn(t,c,f){const b=mk("button",t,"btn "+c,{type:"button"});b.addEventListener("click",async()=>{b.disabled=true;try{await f()}finally{b.disabled=false}});return b}
+function lnk(t,f){const b=mk("button",t,"link",{type:"button"});b.addEventListener("click",f);return b}
+function field(id,l,type,ph){const w=document.createElement("div");w.appendChild(mk("label",l,"",{for:id}));w.appendChild(mk("input","","",{id,type:type||"text",dir:"ltr",placeholder:ph||"",autocomplete:"off"}));return w}
 
 function stepChoose(){
   head("أهلاً بيك في مكتب مرجان","اختار طريقة التسجيل");
-  var g=mk("div","","stack-b");
-  g.appendChild(btn("التسجيل برقم الهاتف","btn-wa",function(){st.m="phone";stepIdent()}));
-  g.appendChild(btn("التسجيل بحساب جوجل","btn-ghost",function(){st.m="google";stepIdent()}));
-  body.appendChild(g);
-  body.appendChild(lnk("لو عندك حساب قبل كده",stepLogin));
+  const g=mk("div","","stack-b");
+  g.appendChild(btn("التسجيل برقم الهاتف","btn-wa",()=>{st.m="phone";stepIdent()}));
+  g.appendChild(btn("التسجيل بحساب جوجل","btn-ghost",()=>{st.m="google";stepIdent()}));
+  body.appendChild(g);body.appendChild(lnk("لو عندك حساب قبل كده",stepLogin));
 }
 function stepIdent(){
-  var ph=st.m==="phone";
+  const ph=st.m==="phone";
   head(ph?"التسجيل برقم الهاتف":"التسجيل بحساب جوجل","");
-  body.appendChild(field("a-id",ph?"رقم الهاتف":"إيميل جوجل","text","ltr",ph?"01xxxxxxxxx":"name@gmail.com"));
-  body.appendChild(btn("التالي","btn-wa",function(){
-    var v=normId(st.m,$("#a-id").value);
+  body.appendChild(field("a-id",ph?"رقم الهاتف":"إيميل جوجل","text",ph?"01xxxxxxxxx":"name@gmail.com"));
+  body.appendChild(btn("التالي","btn-wa",()=>{
+    const v=norm(st.m,$("#a-id").value);
     if(!okId(st.m,v)){say(ph?"اكتب رقم موبايل مصري صحيح (11 رقم).":"اكتب إيميل جوجل صحيح (gmail.com).");return}
-    if(v===ADMIN_PHONE||users().some(function(u){return u.id===v})){say("الحساب ده متسجل قبل كده. استخدم \"عندي حساب\".");return}
     st.id=v;stepPass();
   }));
   body.appendChild(lnk("رجوع",stepChoose));
-}
-function stepCode(){
-  var ph=st.m==="phone";
-  head("أدخل رمز التأكيد",ph?"بعتنا الرمز على رسائل "+st.id:"بعتنا الرمز على حساب جوجل "+st.id);
-  if(OTP_DEMO){var d=mk("div","","demo");d.appendChild(document.createTextNode("وضع تجريبي (مفيش إرسال حقيقي): الرمز هو "));d.appendChild(mk("b",st.code));body.appendChild(d)}
-  body.appendChild(field("a-code","الرمز (6 أرقام)","text","ltr","······"));
-  $("#a-code").setAttribute("inputmode","numeric");$("#a-code").setAttribute("maxlength","6");
-  body.appendChild(btn("تأكيد","btn-wa",function(){
-    if($("#a-code").value.trim()===st.code){stepPass()}
-    else if(++st.tries>=5){say("محاولات كتير. ابدأ من الأول.");stepChoose()}
-    else say("الرمز غلط، جرّب تاني.");
-  }));
-  body.appendChild(lnk("رجوع",stepIdent));
 }
 function stepPass(){
   head("اعمل كلمة سر","6 حروف أو أرقام على الأقل");
   body.appendChild(field("a-p1","كلمة السر","password"));
   body.appendChild(field("a-p2","تأكيد كلمة السر","password"));
-  body.appendChild(btn("إنشاء الحساب","btn-wa",function(){
-    var a=$("#a-p1").value,b=$("#a-p2").value;
+  body.appendChild(btn("إنشاء الحساب","btn-wa",async()=>{
+    const a=$("#a-p1").value,b=$("#a-p2").value;
     if(a.length<6){say("كلمة السر قصيرة (6 على الأقل).");return}
     if(a!==b){say("كلمتين السر مش متطابقين.");return}
-    hash(a).then(function(h){
-      var u=users();u.push({id:st.id,m:st.m,h:h,created:Date.now(),last:Date.now()});saveUsers(u);
-      ls("morgan_session",st.id);stepDone();
-    });
+    try{
+      const c=await createUserWithEmailAndPassword(auth,mail(st.m,st.id),a);
+      await setDoc(doc(db,"users",c.user.uid),{id:st.id,m:st.m,created:Date.now(),last:Date.now()});
+      head("تم إنشاء حسابك ✓","أهلاً بيك في مكتب مرجان");
+      body.appendChild(btn("تمام","btn-wa",()=>{dlg.close()}));
+    }catch(e){say(em(e))}
   }));
-}
-function stepDone(){
-  head("تم إنشاء حسابك ✓","أهلاً بيك في مكتب مرجان");
-  body.appendChild(btn("تمام","btn-wa",function(){dlg.close();refreshBtn()}));
 }
 function stepLogin(){
   head("تسجيل الدخول","اكتب الحساب اللي مسجل بيه (رقم الهاتف أو إيميل جوجل)");
-  body.appendChild(field("l-id","رقم الهاتف أو إيميل جوجل","text","ltr"));
+  body.appendChild(field("l-id","رقم الهاتف أو إيميل جوجل","text"));
   body.appendChild(field("l-p","كلمة السر","password"));
-  body.appendChild(btn("دخول","btn-wa",function(){
-    var v=normId(st.m,$("#l-id").value);if(v.indexOf("@")>0)v=normId("google",v);else v=normId("phone",v);
-    var p=$("#l-p").value;
-    hash(p).then(function(h){
-      if(v===ADMIN_PHONE&&h===ADMIN_HASH){ls("morgan_session",v);dlg.close();openAdmin();refreshBtn();return}
-      var u=users(),x=u.filter(function(q){return q.id===v&&q.h===h})[0];
-      if(!x){say("الحساب أو كلمة السر غلط.");return}
-      x.last=Date.now();saveUsers(u);ls("morgan_session",v);dlg.close();refreshBtn();
-    });
+  body.appendChild(btn("دخول","btn-wa",async()=>{
+    const raw=$("#l-id").value,m=raw.indexOf("@")>0?"google":"phone",v=norm(m,raw);
+    try{
+      const c=await signInWithEmailAndPassword(auth,mail(m,v),$("#l-p").value);
+      if(!isAdmin(c.user)){
+        const r=doc(db,"users",c.user.uid),s=await getDoc(r);
+        if(!s.exists()){await signOut(auth);say("الحساب ده اتحذف.");return}
+        await updateDoc(r,{last:Date.now()});
+      }
+      dlg.close();
+    }catch(e){say(em(e))}
   }));
   body.appendChild(lnk("مفيش عندي حساب — سجّل جديد",stepChoose));
 }
+function gate(){if(!auth.currentUser&&!dlg.open){stepChoose();dlg.showModal()}}
+dlg.addEventListener("cancel",e=>{if(!auth.currentUser)e.preventDefault()});
+dlg.addEventListener("close",gate);
+$("#au-x").addEventListener("click",()=>dlg.close());
 
-/* ===== لوحة التحكم ===== */
-function renderAdmin(){
-  var u=users(),tb=$("#adm-rows");tb.textContent="";
-  $("#adm-n").textContent=u.length;$("#adm-who").textContent=ADMIN_PHONE+" (أنت)";
-  if(!u.length){var r=mk("tr");var c=mk("td","مفيش مستخدمين لسه.");c.colSpan=6;r.appendChild(c);tb.appendChild(r)}
-  u.forEach(function(x,i){
-    var r=mk("tr");
-    r.appendChild(mk("td",String(i+1)));
-    var c=mk("td",x.id);c.dir="ltr";r.appendChild(c);
-    r.appendChild(mk("td",x.m==="phone"?"هاتف":"جوجل"));
-    r.appendChild(mk("td",fmt(x.created)));r.appendChild(mk("td",fmt(x.last)));
-    var d=mk("td");var b=mk("button","حذف","del",{type:"button"});
-    b.addEventListener("click",function(){if(confirm("حذف الحساب "+x.id+"؟")){saveUsers(users().filter(function(q){return q.id!==x.id}));renderAdmin()}});
-    d.appendChild(b);r.appendChild(d);tb.appendChild(r);
-  });
+/* admin */
+let unsub=null;
+function openAdmin(){
+  $("#adm-msg").textContent="";$("#adm-who").textContent=ADMIN+" (أنت)";
+  if(!adm.open)adm.showModal();
+  if(unsub)unsub();
+  unsub=onSnapshot(collection(db,"users"),snap=>{
+    const rows=snap.docs.map(d=>({uid:d.id,...d.data()})).filter(x=>x.id!==ADMIN).sort((a,b)=>(a.created||0)-(b.created||0));
+    const tb=$("#adm-rows");tb.textContent="";$("#adm-n").textContent=rows.length;
+    if(!rows.length){const r=mk("tr"),c=mk("td","مفيش مستخدمين لسه.");c.colSpan=6;r.appendChild(c);tb.appendChild(r)}
+    rows.forEach((x,i)=>{
+      const r=mk("tr");r.appendChild(mk("td",String(i+1)));
+      const c=mk("td",x.id);c.dir="ltr";r.appendChild(c);
+      r.appendChild(mk("td",x.m==="phone"?"هاتف":"جوجل"));r.appendChild(mk("td",fmt(x.created)));r.appendChild(mk("td",fmt(x.last)));
+      const d=mk("td"),b=mk("button","حذف","del",{type:"button"});
+      b.addEventListener("click",async()=>{if(confirm("حذف الحساب "+x.id+"؟"))try{await deleteDoc(doc(db,"users",x.uid))}catch(e){$("#adm-msg").textContent=em(e)}});
+      d.appendChild(b);r.appendChild(d);tb.appendChild(r);
+    });
+  },e=>{$("#adm-msg").textContent=em(e)});
 }
-function openAdmin(){renderAdmin();$("#adm-msg").textContent="";adm.showModal()}
-$("#nu-add").addEventListener("click",function(){
-  var m=$("#nu-m").value,v=normId(m,$("#nu-i").value),p=$("#nu-p").value,am=$("#adm-msg");
+adm.addEventListener("close",()=>{if(unsub){unsub();unsub=null}});
+$("#adm-x").addEventListener("click",()=>adm.close());
+$("#adm-out").addEventListener("click",async()=>{adm.close();await signOut(auth)});
+$("#nu-add").addEventListener("click",async()=>{
+  const m=$("#nu-m").value,v=norm(m,$("#nu-i").value),p=$("#nu-p").value,am=$("#adm-msg");
   if(!okId(m,v)){am.textContent="الرقم أو الإيميل غير صحيح.";return}
   if(p.length<6){am.textContent="كلمة السر 6 على الأقل.";return}
-  if(v===ADMIN_PHONE||users().some(function(q){return q.id===v})){am.textContent="الحساب موجود قبل كده.";return}
-  hash(p).then(function(h){var u=users();u.push({id:v,m:m,h:h,created:Date.now(),last:0});saveUsers(u);$("#nu-i").value="";$("#nu-p").value="";am.textContent="";renderAdmin()});
+  let sec;
+  try{
+    sec=initializeApp(cfg,"sec"+Date.now());const sa=getAuth(sec);
+    const c=await createUserWithEmailAndPassword(sa,mail(m,v),p);
+    await setDoc(doc(getFirestore(sec),"users",c.user.uid),{id:v,m,created:Date.now(),last:0});
+    await signOut(sa);$("#nu-i").value="";$("#nu-p").value="";am.textContent="تمت الإضافة ✓";
+  }catch(e){am.textContent=em(e)}
+  finally{if(sec)deleteApp(sec)}
 });
-function logout(){try{localStorage.removeItem("morgan_session")}catch(e){}delete mem.morgan_session;adm.close();refreshBtn();gate()}
-$("#adm-out").addEventListener("click",logout);
-$("#adm-x").addEventListener("click",function(){adm.close()});
-$("#au-x").addEventListener("click",function(){dlg.close()});
 
-/* ===== زرار الهيدر ===== */
-var hb=$("#auth-open");
-function refreshBtn(){
-  var s=ls("morgan_session");dlg.classList.toggle("gate",!s);
-  hb.textContent=s?(s===ADMIN_PHONE?"لوحة التحكم":"خروج"):"دخول";
-}
-hb.addEventListener("click",function(){
-  var s=ls("morgan_session");
-  if(s===ADMIN_PHONE){openAdmin();return}
-  if(s){logout();return}
-  stepChoose();dlg.showModal();
+/* state */
+let first=true;
+function refreshBtn(u){dlg.classList.toggle("gate",!u);hb.textContent=u?(isAdmin(u)?"لوحة التحكم":"خروج"):"دخول"}
+hb.addEventListener("click",async()=>{
+  const u=auth.currentUser;
+  if(isAdmin(u))openAdmin();else if(u)await signOut(auth);else{stepChoose();dlg.showModal()}
 });
-function gate(){if(!ls("morgan_session")&&!dlg.open){stepChoose();dlg.showModal()}}
-dlg.addEventListener("cancel",function(e){if(!ls("morgan_session"))e.preventDefault()});
-dlg.addEventListener("close",gate);
-refreshBtn();gate();
-})();
+onAuthStateChanged(auth,u=>{
+  refreshBtn(u);
+  if(!u&&adm.open)adm.close();
+  if(!u)gate();
+  if(isAdmin(u)&&first===false&&!adm.open){dlg.open&&dlg.close();openAdmin()}
+  first=false;
+});
 </script>
 </body>
 </html>
